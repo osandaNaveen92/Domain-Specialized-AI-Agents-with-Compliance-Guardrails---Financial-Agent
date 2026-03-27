@@ -1,4 +1,20 @@
 from config.db import transactions_collection, matches_collection
+from config.db import journal_collection
+from config.db import audit_collection
+from datetime import datetime
+
+def log_action(agent, action, details):
+    log = {
+        "timestamp": str(datetime.now()),
+        "agent": agent,
+        "action": action,
+        "details": details
+    }
+    audit_collection.insert_one(log)
+
+def save_journal_entries(entries):
+    if entries:
+        journal_collection.insert_many(entries)
 
 def save_transactions(transactions):
     if transactions:

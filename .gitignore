@@ -1,0 +1,14 @@
+# Ignore environment variables (sensitive data)
+.env
+
+# Ignore virtual environments
+venv/
+.venv/
+env/
+
+# Python compiled files
+__pycache__/
+*.pyc
+
+# Environment variables
+.env
