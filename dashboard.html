@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Financial Dashboard</title>
+</head>
+<body>
+
+<h1>Financial Close Dashboard</h1>
+
+<h2>Matches</h2>
+<div id="matches"></div>
+
+<h2>Journal Entries</h2>
+<div id="journal"></div>
+
+<script>
+async function loadData() {
+    const matches = await fetch("http://127.0.0.1:8000/matches").then(r => r.json());
+    const journal = await fetch("http://127.0.0.1:8000/journal").then(r => r.json());
+
+    document.getElementById("matches").innerHTML =
+        matches.map(m => `<p>${m.status} - ${m.bank_id || ''} ${m.gl_id || ''}</p>`).join("");
+
+    document.getElementById("journal").innerHTML =
+        journal.map(j => `
+            <p>
+            ${j.entry_id} | ${j.amount} | ${j.status} <br>
+            ${j.explanation}
+            </p>
+            <button onclick="approve('${j.entry_id}')">Approve</button>
+            <button onclick="reject('${j.entry_id}')">Reject</button>
+        `).join("");
+}
+
+loadData();
+</script>
+
+<script>
+async function approve(id) {
+    await fetch(`http://127.0.0.1:8000/approve/${id}`, {method: "POST"});
+    loadData();
+}
+
+async function reject(id) {
+    await fetch(`http://127.0.0.1:8000/reject/${id}`, {method: "POST"});
+    loadData();
+}
+</script>
+
+</body>
+</html>
