@@ -23,15 +23,20 @@ def save_transactions(transactions):
 def clear_collections():
     transactions_collection.delete_many({})
     matches_collection.delete_many({})
+    journal_collection.delete_many({})
+    audit_collection.delete_many({})
 
 def save_matches(matched, unmatched_bank, unmatched_gl):
     records = []
 
-    for b, g in matched:
+    for item in matched:
+        b = item["bank"]
+        g = item["gl"]
         records.append({
             "bank_id": b["transaction_id"],
             "gl_id": g["transaction_id"],
-            "status": "matched"
+            "status": "matched",
+            "confidence": item.get("confidence", 0)
         })
 
     for b in unmatched_bank:

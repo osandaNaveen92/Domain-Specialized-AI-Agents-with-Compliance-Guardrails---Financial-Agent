@@ -12,7 +12,7 @@ def generate_journal_entries(unmatched_bank, unmatched_gl):
             "amount": txn["amount"],
             "reason": f"Unrecorded bank transaction: {txn['description']}",
             "source": "bank",
-            "status": "draft"
+            "status": "REVIEW_REQUIRED"
         }
         generated_text = f"Generate explanation for unmatched bank txn {txn['transaction_id']}"
         entry["explanation"] = generated_text
@@ -28,7 +28,7 @@ def generate_journal_entries(unmatched_bank, unmatched_gl):
             "amount": txn["amount"],
             "reason": f"GL entry not found in bank: {txn['description']}",
             "source": "gl",
-            "status": "draft"
+            "status": "REVIEW_REQUIRED"
         }
         generated_text = f"Generate explanation for unmatched GL txn {txn['transaction_id']}"
         entry["explanation"] = generated_text

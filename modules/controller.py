@@ -23,12 +23,11 @@ def apply_guardrails(journal_entries):
 
         # Assign status
         if issues:
-            if entry["status"] == "REVIEW_REQUIRED":
-                entry["explanation"] = "Manual review required due to policy violation."
-            else:
-                entry["explanation"] = generate_explanation(entry)
+            entry["status"] = "REVIEW_REQUIRED"
+            entry["explanation"] = "; ".join(issues)
         else:
             entry["status"] = "READY_FOR_APPROVAL"
+            entry["explanation"] = generate_explanation(entry)
 
         reviewed_entries.append(entry)
 
