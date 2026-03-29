@@ -20,11 +20,12 @@ def save_transactions(transactions):
     if transactions:
         transactions_collection.insert_many(transactions)
         
-def clear_collections():
+def clear_collections(clear_audit=False):
     transactions_collection.delete_many({})
     matches_collection.delete_many({})
     journal_collection.delete_many({})
-    audit_collection.delete_many({})
+    if clear_audit:
+        audit_collection.delete_many({})
 
 def save_matches(matched, unmatched_bank, unmatched_gl):
     records = []

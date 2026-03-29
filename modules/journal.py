@@ -11,6 +11,9 @@ def generate_journal_entries(unmatched_bank, unmatched_gl):
             "credit_account": "Bank",
             "amount": txn["amount"],
             "reason": f"Unrecorded bank transaction: {txn['description']}",
+            "transaction_id": txn["transaction_id"],
+            "transaction_date": txn["date"],
+            "prepared_by": "reconciliation_agent",
             "source": "bank",
             "status": "REVIEW_REQUIRED"
         }
@@ -27,6 +30,9 @@ def generate_journal_entries(unmatched_bank, unmatched_gl):
             "credit_account": "Suspense/Liability",
             "amount": txn["amount"],
             "reason": f"GL entry not found in bank: {txn['description']}",
+            "transaction_id": txn["transaction_id"],
+            "transaction_date": txn["date"],
+            "prepared_by": "reconciliation_agent",
             "source": "gl",
             "status": "REVIEW_REQUIRED"
         }

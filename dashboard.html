@@ -39,6 +39,12 @@
             flex-wrap: wrap;
             margin-top: 12px;
         }
+        .input {
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 8px 10px;
+            min-width: 200px;
+        }
         button {
             border: 1px solid var(--line);
             background: #fff;
@@ -66,7 +72,7 @@
         }
         .kpis {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(5, 1fr);
             gap: 10px;
             margin-top: 12px;
         }
@@ -115,8 +121,13 @@
         <h1>Financial Close Dashboard</h1>
         <div class="controls">
             <button class="primary" onclick="runClose()">Run Reconciliation</button>
+            <button onclick="initiateClose()">Initiate Close</button>
+            <button onclick="viewCloseStatus()">View Close Status</button>
+            <button onclick="viewClosePackage()">View Close Package</button>
             <button onclick="generateReport()">Generate Audit Report</button>
             <button onclick="loadData()">Refresh</button>
+            <input id="approverName" class="input" placeholder="Approver name (e.g., Priya)" />
+            <input id="closePeriod" class="input" placeholder="Close period (YYYY-MM)" />
         </div>
         <div id="toast"></div>
         <div class="kpis">
@@ -124,6 +135,7 @@
             <div class="kpi"><div class="v" id="kpiUnBank">0</div><div>Unmatched Bank</div></div>
             <div class="kpi"><div class="v" id="kpiUnGl">0</div><div>Unmatched GL</div></div>
             <div class="kpi"><div class="v" id="kpiReady">0</div><div>Ready For Approval</div></div>
+            <div class="kpi"><div class="v" id="kpiPending">0</div><div>Pending Review</div></div>
         </div>
     </div>
 
@@ -149,15 +161,32 @@ function statusClass(status) {
     return "review";
 }
 
+function riskClass(priority) {
+    if (priority === "CRITICAL" || priority === "HIGH") return "rej";
+    if (priority === "MEDIUM") return "review";
+    return "ok";
+}
+
+function getApprover() {
+    const raw = document.getElementById("approverName").value.trim();
+    return raw || "unknown_user";
+}
+
+function getClosePeriod() {
+    const raw = document.getElementById("closePeriod").value.trim();
+    return raw || null;
+}
+
 function setToast(msg) {
     document.getElementById("toast").textContent = msg;
 }
 
 async function loadData() {
     try {
-        const [matches, journal] = await Promise.all([
+        const [matches, journal, governance] = await Promise.all([
             fetch(`${api}/matches`).then(r => r.json()),
-            fetch(`${api}/journal`).then(r => r.json())
+            fetch(`${api}/journal`).then(r => r.json()),
+            fetch(`${api}/governance/dashboard`).then(r => r.json())
         ]);
 
         const matchedCount = matches.filter(m => m.status === "matched").length;
@@ -168,6 +197,7 @@ async function loadData() {
         document.getElementById("kpiUnBank").textContent = unBank;
         document.getElementById("kpiUnGl").textContent = unGl;
         document.getElementById("kpiReady").textContent = ready;
+        document.getElementById("kpiPending").textContent = governance.pending_reviews || 0;
 
         document.getElementById("matches").innerHTML = matches.length ? `
             <table class="table">
@@ -190,7 +220,7 @@ async function loadData() {
         document.getElementById("journal").innerHTML = journal.length ? `
             <table class="table">
                 <thead>
-                    <tr><th>Entry</th><th>Amount</th><th>Status</th><th>Reason</th><th>Action</th></tr>
+                    <tr><th>Entry</th><th>Amount</th><th>Status</th><th>Risk</th><th>Reason</th><th>Controls</th><th>Owner</th><th>Action</th></tr>
                 </thead>
                 <tbody>
                     ${journal.map(j => `
@@ -198,7 +228,18 @@ async function loadData() {
                             <td>${j.entry_id}</td>
                             <td>${j.amount}</td>
                             <td><span class="pill ${statusClass(j.status)}">${j.status}</span></td>
+                            <td>
+                                <span class="pill ${riskClass((j.risk && j.risk.priority) || 'NONE')}">
+                                    ${(j.risk && j.risk.priority) || "NONE"} (${(j.risk && j.risk.score) || 0})
+                                </span>
+                            </td>
                             <td>${j.explanation || "-"}</td>
+                            <td>
+                                ${(j.control_summary && typeof j.control_summary.failed === "number")
+                                    ? `${j.control_summary.failed} fail / ${j.control_summary.total} total`
+                                    : "-"}
+                            </td>
+                            <td>${j.approved_by || j.rejected_by || "-"}</td>
                             <td>
                                 <button onclick="approve('${j.entry_id}')">Approve</button>
                                 <button onclick="reject('${j.entry_id}')">Reject</button>
@@ -219,20 +260,34 @@ loadData();
 
 <script>
 async function approve(id) {
-    await fetch(`${api}/approve/${id}`, {method: "POST"});
-    setToast(`Approved ${id}`);
+    const approver = encodeURIComponent(getApprover());
+    const res = await fetch(`${api}/approve/${id}?approver=${approver}`, {method: "POST"});
+    const data = await res.json();
+    if (!res.ok) {
+        setToast(`Approval failed: ${data.detail || "Unknown error"}`);
+        return;
+    }
+    setToast(`Approved ${id} by ${decodeURIComponent(approver)}`);
     loadData();
 }
 
 async function reject(id) {
-    await fetch(`${api}/reject/${id}`, {method: "POST"});
-    setToast(`Rejected ${id}`);
+    const approver = encodeURIComponent(getApprover());
+    const res = await fetch(`${api}/reject/${id}?approver=${approver}`, {method: "POST"});
+    const data = await res.json();
+    if (!res.ok) {
+        setToast(`Rejection failed: ${data.detail || "Unknown error"}`);
+        return;
+    }
+    setToast(`Rejected ${id} by ${decodeURIComponent(approver)}`);
     loadData();
 }
 
 async function runClose() {
+    const period = getClosePeriod();
     setToast("Running reconciliation...");
-    const res = await fetch(`${api}/run-close`, {method: "POST"});
+    const query = period ? `?period=${encodeURIComponent(period)}` : "";
+    const res = await fetch(`${api}/run-close${query}`, {method: "POST"});
     const data = await res.json();
     if (!res.ok) {
         setToast(`Run failed: ${data.detail || "unknown error"}`);
@@ -247,6 +302,52 @@ async function generateReport() {
     const res = await fetch(`${api}/generate-report`);
     const data = await res.json();
     setToast(data.message || "Audit report generated.");
+}
+
+async function initiateClose() {
+    const period = getClosePeriod();
+    if (!period) {
+        setToast("Please enter close period in YYYY-MM format.");
+        return;
+    }
+    const res = await fetch(`${api}/close/initiate?period=${encodeURIComponent(period)}`, {method: "POST"});
+    const data = await res.json();
+    if (!res.ok) {
+        setToast(`Initiation failed: ${data.detail || "unknown error"}`);
+        return;
+    }
+    setToast(`Close initiated for ${data.period}`);
+}
+
+async function viewCloseStatus() {
+    const period = getClosePeriod();
+    if (!period) {
+        setToast("Please enter close period in YYYY-MM format.");
+        return;
+    }
+    const res = await fetch(`${api}/close/status?period=${encodeURIComponent(period)}`);
+    const data = await res.json();
+    if (!res.ok) {
+        setToast(`Status failed: ${data.detail || "unknown error"}`);
+        return;
+    }
+    const pending = (data.checklist || []).filter(t => t.status !== "COMPLETED").length;
+    setToast(`Close ${data.period}: ${data.status} | Open tasks: ${pending}`);
+}
+
+async function viewClosePackage() {
+    const period = getClosePeriod();
+    if (!period) {
+        setToast("Please enter close period in YYYY-MM format.");
+        return;
+    }
+    const res = await fetch(`${api}/close/package?period=${encodeURIComponent(period)}`);
+    const data = await res.json();
+    if (!res.ok) {
+        setToast(`Package failed: ${data.detail || "unknown error"}`);
+        return;
+    }
+    setToast(`Package ${data.period}: Status=${data.overall_status}, Pending=${data.summary.pending_reviews}`);
 }
 </script>
 

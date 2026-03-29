@@ -1,0 +1,35 @@
+[
+  {
+    "control_id": "SOX-REC-001",
+    "framework": "SOX",
+    "description": "Bank transactions must match GL entries",
+    "rule_type": "amount_match",
+    "severity": "HIGH",
+    "evidence_required": true
+  },
+  {
+    "control_id": "SOX-REC-002",
+    "framework": "SOX",
+    "description": "No missing transactions allowed",
+    "rule_type": "completeness_check",
+    "severity": "HIGH",
+    "evidence_required": true
+  },
+  {
+    "control_id": "IFRS-REV-001",
+    "framework": "IFRS",
+    "description": "Revenue must be recognized in correct period",
+    "rule_type": "date_validation",
+    "severity": "MEDIUM",
+    "evidence_required": false
+  },
+  {
+    "control_id": "GAAP-EXP-001",
+    "framework": "GAAP",
+    "description": "Expenses must not exceed threshold without approval",
+    "rule_type": "threshold_check",
+    "severity": "MEDIUM",
+    "threshold": 100000,
+    "evidence_required": true
+  }
+]

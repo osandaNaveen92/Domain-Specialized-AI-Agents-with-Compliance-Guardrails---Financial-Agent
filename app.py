@@ -2,22 +2,24 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from config.db import transactions_collection, matches_collection, journal_collection
 from modules.report import generate_audit_report
-from modules.journal import generate_journal_entries
-from modules.controller import apply_guardrails
-from utils.parser import parse_csv
-from utils.matcher import match_transactions
-from utils.db_utils import (
-    clear_collections,
-    save_transactions,
-    save_matches,
-    save_journal_entries,
-    log_action,
-)
+from modules.control_loader import load_controls
+from src.data.database import FinancialRepository
+from src.governance.engine import GovernanceEngine
+from src.models.schemas import ClosePackageResponse, CloseRunResponse, CloseStatusResponse
+from src.services.close_service import CloseService
 
 app = FastAPI()
 BASE_DIR = Path(__file__).resolve().parent
+
+controls = load_controls()
+repository = FinancialRepository()
+governance_engine = GovernanceEngine()
+close_service = CloseService(
+    repository=repository,
+    controls=controls,
+    governance_engine=governance_engine,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -37,80 +39,81 @@ def dashboard():
 
 @app.get("/transactions")
 def get_transactions():
-    return list(transactions_collection.find({}, {"_id": 0}))
+    return repository.get_transactions()
 
 @app.get("/matches")
 def get_matches():
-    return list(matches_collection.find({}, {"_id": 0}))
+    return repository.get_matches()
 
 @app.get("/journal")
 def get_journal():
-    return list(journal_collection.find({}, {"_id": 0}))
+    return repository.get_journal_entries()
 
 @app.post("/approve/{entry_id}")
-def approve_entry(entry_id: str):
-    journal_collection.update_one(
-        {"entry_id": entry_id},
-        {"$set": {"status": "APPROVED"}}
-    )
-    return {"message": "Approved"}
+def approve_entry(entry_id: str, approver: str = "unknown_user"):
+    result = repository.update_entry_status(entry_id=entry_id, status="APPROVED", actor=approver)
+    if not result["updated"]:
+        if result.get("reason") == "sod_violation":
+            raise HTTPException(status_code=409, detail=result.get("message"))
+        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+
+    repository.log_action("approval_agent", "approve_entry", result)
+    return {"message": "Approved", **result}
 
 @app.post("/reject/{entry_id}")
-def reject_entry(entry_id: str):
-    journal_collection.update_one(
-        {"entry_id": entry_id},
-        {"$set": {"status": "REJECTED"}}
-    )
-    return {"message": "Rejected"}
+def reject_entry(entry_id: str, approver: str = "unknown_user"):
+    result = repository.update_entry_status(entry_id=entry_id, status="REJECTED", actor=approver)
+    if not result["updated"]:
+        if result.get("reason") == "sod_violation":
+            raise HTTPException(status_code=409, detail=result.get("message"))
+        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+
+    repository.log_action("approval_agent", "reject_entry", result)
+    return {"message": "Rejected", **result}
+
+@app.post("/close/initiate")
+def initiate_close(period: str) -> CloseStatusResponse:
+    return close_service.initiate_close(period)
+
+
+@app.get("/close/status")
+def close_status(period: str) -> CloseStatusResponse:
+    status = close_service.get_close_status(period)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"No close run found for period {period}")
+    return status
+
+
+@app.get("/close/package")
+def close_package(period: str) -> ClosePackageResponse:
+    status = close_service.get_close_status(period)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"No close run found for period {period}")
+    return close_service.build_close_package(period)
+
 
 @app.post("/run-close")
-def run_close():
+def run_close(period: str | None = None) -> CloseRunResponse:
     bank_file = BASE_DIR / "data" / "sample_bank.csv"
     gl_file = BASE_DIR / "data" / "sample_gl.csv"
 
     if not bank_file.exists() or not gl_file.exists():
         raise HTTPException(status_code=404, detail="Sample CSV files not found in data directory")
 
-    clear_collections()
+    return close_service.run_close(bank_file=bank_file, gl_file=gl_file, period=period)
 
-    bank_data = parse_csv(str(bank_file), "bank")
-    gl_data = parse_csv(str(gl_file), "gl")
-    save_transactions(bank_data + gl_data)
 
-    matched, unmatched_bank, unmatched_gl = match_transactions(bank_data, gl_data)
-    save_matches(matched, unmatched_bank, unmatched_gl)
+@app.get("/reviews/pending")
+def get_pending_reviews():
+    return repository.get_pending_reviews()
 
-    journal_entries = generate_journal_entries(unmatched_bank, unmatched_gl)
-    reviewed_entries = apply_guardrails(journal_entries)
-    save_journal_entries(reviewed_entries)
 
-    log_action(
-        "reconciliation_agent",
-        "run_close",
-        {
-            "bank_records": len(bank_data),
-            "gl_records": len(gl_data),
-            "matched": len(matched),
-            "unmatched_bank": len(unmatched_bank),
-            "unmatched_gl": len(unmatched_gl),
-            "journal_entries": len(reviewed_entries),
-        },
-    )
-
-    return {
-        "message": "Financial close run completed",
-        "summary": {
-            "bank_records": len(bank_data),
-            "gl_records": len(gl_data),
-            "matched": len(matched),
-            "unmatched_bank": len(unmatched_bank),
-            "unmatched_gl": len(unmatched_gl),
-            "journal_entries": len(reviewed_entries),
-        },
-    }
+@app.get("/governance/dashboard")
+def get_governance_dashboard():
+    return repository.get_governance_dashboard()
 
 @app.get("/generate-report")
 def generate_report():
-    entries = list(journal_collection.find({}, {"_id": 0}))
+    entries = repository.get_journal_entries()
     generate_audit_report(entries)
     return {"message": "Audit report generated as audit_report.pdf"}
